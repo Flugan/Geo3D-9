@@ -25,11 +25,11 @@
     <ClCompile Include="proxydll.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="proxydll.def" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="proxydll.h" />
     <ClInclude Include="stdafx.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="proxydll.def" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E58EF996-7025-4EF6-999A-E142F25952F4}</ProjectGuid>

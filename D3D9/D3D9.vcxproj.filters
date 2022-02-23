@@ -15,11 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="proxydll.def">
-      <Filter>Source Files</Filter>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="proxydll.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -40,5 +35,10 @@
     <ClCompile Include="Crc32.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="proxydll.def">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

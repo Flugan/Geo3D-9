@@ -23,13 +23,13 @@
     <ClCompile Include="d3d9.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="proxydll.def" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="..\nvstereo.h" />
     <ClInclude Include="proxydll.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="stdafx.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="proxydll.def" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{C9CDABDC-C49E-4ABF-82C3-5C78E59E4A58}</ProjectGuid>
