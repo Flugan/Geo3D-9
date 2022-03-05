@@ -20,27 +20,15 @@ HINSTANCE			gl_hThisInstance;
 HINSTANCE           gl_hOriginalDll = NULL;
 bool				gl_hookedDevice = false;
 bool				gl_hookedContext = false;
-bool				gl_dumpBin = false;
 bool				gl_log = false;
-bool				gl_cache_shaders = false;
-bool				gl_fix_enabled = true;
+bool				gl_left = true;
 CRITICAL_SECTION	gl_CS;
-// Our parameters for the stereo parameters texture.
-DirectX::XMFLOAT4	iniParams[INI_PARAMS_SIZE];
 FILE*				LogFile = NULL;
-ID3D11Texture1D* gIniTexture = NULL;
-ID3D11ShaderResourceView* gIniResourceView = NULL;
+string				sep = "0.1";
+string				conv = "1.0";
 #pragma data_seg ()
 
 CNktHookLib cHookMgr;
-
-typedef HMODULE(WINAPI *lpfnLoadLibraryExW)(_In_ LPCWSTR lpLibFileName, _Reserved_ HANDLE hFile, _In_ DWORD dwFlags);
-static HMODULE WINAPI Hooked_LoadLibraryExW(_In_ LPCWSTR lpLibFileName, _Reserved_ HANDLE hFile, _In_ DWORD dwFlags);
-static struct
-{
-	SIZE_T nHookId;
-	lpfnLoadLibraryExW fnLoadLibraryExW;
-} sLoadLibraryExW_Hook = { 40, NULL };
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 	bool result = true;
@@ -87,35 +75,171 @@ static UINT64 fnv_64_buf(const void *buf, size_t len)
 
 char cwd[MAX_PATH];
 
+
+string changeASM(vector<byte> ASM, bool left) {
+	auto lines = stringToLines((char*)ASM.data(), ASM.size());
+	string shader;
+	string oReg;
+	bool dcl = false;
+	bool dcl_ICB = false;
+	int temp = 0;
+	for (int i = 0; i < lines.size(); i++) {
+		string s = lines[i];
+		if (s.find("dcl") == 0) {
+			dcl = true;
+			dcl_ICB = false;
+			if (s.find("dcl_output_siv") == 0 && s.find("position") != string::npos) {
+				oReg = s.substr(15, 2);
+				shader += s + "\n";
+			}
+			else if (s.find("dcl_temps") == 0) {
+				string num = s.substr(10);
+				temp = atoi(num.c_str()) + 2;
+				shader += "dcl_temps " + to_string(temp) + "\n";
+			}
+			else if (s.find("dcl_immediateConstantBuffer") == 0) {
+				dcl_ICB = true;
+				shader += s + "\n";
+			}
+			else {
+				shader += s + "\n";
+			}
+		}
+		else if (dcl_ICB == true) {
+			shader += s + "\n";
+		}
+		else if (dcl == true) {
+			// after dcl
+			if (s.find("ret") < s.size()) {
+				string changeSep = left ? "l(-" + sep + ")" : "l(" + sep + ")";
+				shader +=
+					"eq r" + to_string(temp - 2) + ".x, r" + to_string(temp - 1) + ".w, l(1.0)\n" +
+					"if_z r" + to_string(temp - 2) + ".x\n"
+					"  add r" + to_string(temp - 2) + ".x, r" + to_string(temp - 1) + ".w, l(-" + conv + ")\n" +
+					"  mad r" + to_string(temp - 2) + ".x, r" + to_string(temp - 2) + ".x, " + changeSep + ", r" + to_string(temp - 1) + ".x\n" +
+					"  mov " + oReg + ".x, r" + to_string(temp - 2) + ".x\n" +
+					"  ret\n" +
+					"endif\n";
+			}
+			if (oReg.size() == 0) {
+				// no output
+				return "";
+			}
+			if (temp == 0) {
+				// add temps
+				temp = 2;
+				shader += "dcl_temps 2\n";
+			}
+			shader += s + "\n";
+			auto pos = s.find(oReg);
+			if (pos != string::npos) {
+				string reg = "r" + to_string(temp - 1);
+				for (int i = 0; i < s.size(); i++) {
+					if (i < pos) {
+						shader += s[i];
+					}
+					else if (i == pos) {
+						shader += reg;
+					}
+					else if (i > pos + 1) {
+						shader += s[i];
+					}
+				}
+				shader += "\n";
+			}
+		}
+		else {
+			// before dcl
+			shader += s + "\n";
+		}
+	}
+	return shader;
+}
+
 #pragma region hook
 typedef HRESULT(STDMETHODCALLTYPE* D3D11_VS)(ID3D11Device* This, const void* pShaderBytecode, SIZE_T BytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11VertexShader** ppVertexShader);
 static struct {
 	SIZE_T nHookId;
-	D3D11_VS fnCreateVertexShader;
+	D3D11_VS fn;
 } sCreateVertexShader_Hook = { 0, NULL };
 HRESULT STDMETHODCALLTYPE D3D11_CreateVertexShader(ID3D11Device* This, const void* pShaderBytecode, SIZE_T BytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11VertexShader** ppVertexShader) {
-	UINT64 _crc = fnv_64_buf(pShaderBytecode, BytecodeLength);
-	HRESULT res = sCreateVertexShader_Hook.fnCreateVertexShader(This, pShaderBytecode, BytecodeLength, pClassLinkage, ppVertexShader);
-	return res;
+	HRESULT hr;
+	vector<byte> v;
+	byte* bArray = (byte*)pShaderBytecode;
+	for (int i = 0; i < BytecodeLength; i++) {
+		v.push_back(bArray[i]);
+	}
+	vector<byte> ASM = disassembler(v);
+
+	string shaderL = changeASM(ASM, true);
+	string shaderR = changeASM(ASM, false);
+
+	if (shaderL == "") {
+		hr = sCreateVertexShader_Hook.fn(This, pShaderBytecode, BytecodeLength, pClassLinkage, ppVertexShader);
+		VSO vso = {};
+		vso.Neutral = (ID3D11VertexShader*)*ppVertexShader;
+		VSOmap[vso.Neutral] = vso;
+		return hr;
+	}
+
+	vector<byte> a;
+	VSO vso = {};
+
+	a.clear();
+	for (int i = 0; i < shaderL.length(); i++) {
+		a.push_back(shaderL[i]);
+	}
+	auto compiled = assembler(a, v);
+	hr = sCreateVertexShader_Hook.fn(This, compiled.data(), compiled.size(), pClassLinkage, ppVertexShader);
+	vso.Left = (ID3D11VertexShader*)*ppVertexShader;
+
+	a.clear();
+	for (int i = 0; i < shaderR.length(); i++) {
+		a.push_back(shaderR[i]);
+	}
+	compiled = assembler(a, v);
+	hr = sCreateVertexShader_Hook.fn(This, compiled.data(), compiled.size(), pClassLinkage, ppVertexShader);
+	vso.Right = (ID3D11VertexShader*)*ppVertexShader;
+	VSOmap[vso.Right] = vso;
+	return hr;
 }
 
 typedef void(STDMETHODCALLTYPE* D3D11_GIC)(ID3D11Device* This, ID3D11DeviceContext** ppImmediateContext);
 static struct {
 	SIZE_T nHookId;
-	D3D11_GIC fnGetImmediateContext;
+	D3D11_GIC fn;
 } sGetImmediateContext_Hook = { 0, NULL };
 void STDMETHODCALLTYPE D3D11_GetImmediateContext(ID3D11Device* This, ID3D11DeviceContext** ppImmediateContext) {
-	sGetImmediateContext_Hook.fnGetImmediateContext(This, ppImmediateContext);
+	sGetImmediateContext_Hook.fn(This, ppImmediateContext);
 	hook(ppImmediateContext);
 }
 
 typedef void(STDMETHODCALLTYPE* D3D11C_VSSS)(ID3D11DeviceContext* This, ID3D11VertexShader* pVertexShader, ID3D11ClassInstance* const* ppClassInstances, UINT NumClassInstances);
 static struct {
 	SIZE_T nHookId;
-	D3D11C_VSSS fnVSSetShader;
+	D3D11C_VSSS fn;
 } sVSSetShader_Hook = { 0, NULL };
 void STDMETHODCALLTYPE D3D11C_VSSetShader(ID3D11DeviceContext* This, ID3D11VertexShader* pVertexShader, ID3D11ClassInstance* const* ppClassInstances, UINT NumClassInstances) {
-	sVSSetShader_Hook.fnVSSetShader(This, pVertexShader, ppClassInstances, NumClassInstances);
+	if (VSOmap.count(pVertexShader) == 1) {
+		VSO* vso = &VSOmap[pVertexShader];
+		if (vso->Neutral) {
+			LogInfo("No output VS\n");
+			sVSSetShader_Hook.fn(This, vso->Neutral, ppClassInstances, NumClassInstances);
+		}
+		else {
+			LogInfo("Stereo VS\n");
+			if (gl_left) {
+				sVSSetShader_Hook.fn(This, vso->Left, ppClassInstances, NumClassInstances);
+			}
+			else {
+				sVSSetShader_Hook.fn(This, vso->Right, ppClassInstances, NumClassInstances);
+			}
+		}
+	}
+	else {
+		LogInfo("Unknown VS\n");
+		sVSSetShader_Hook.fn(This, pVertexShader, ppClassInstances, NumClassInstances);
+	}
 }
 
 void hook(ID3D11DeviceContext** ppContext) {
@@ -126,7 +250,7 @@ void hook(ID3D11DeviceContext** ppContext) {
 			DWORD_PTR*** vTable = (DWORD_PTR***)*ppContext;
 			D3D11C_VSSS origVSSS = (D3D11C_VSSS)(*vTable)[11];
 
-			cHookMgr.Hook(&(sVSSetShader_Hook.nHookId), (LPVOID*)&(sVSSetShader_Hook.fnVSSetShader), origVSSS, D3D11C_VSSetShader);
+			cHookMgr.Hook(&(sVSSetShader_Hook.nHookId), (LPVOID*)&(sVSSetShader_Hook.fn), origVSSS, D3D11C_VSSetShader);
 
 			gl_hookedContext = true;
 		}
@@ -140,6 +264,7 @@ static struct {
 } sDXGI_Present_Hook = { 0, NULL };
 HRESULT STDMETHODCALLTYPE DXGIH_Present(IDXGISwapChain* This, UINT SyncInterval, UINT Flags) {
 	LogInfo("Present\n");
+	gl_left = !gl_left;
 	return sDXGI_Present_Hook.fnDXGI_Present(This, SyncInterval, Flags);
 }
 
@@ -153,9 +278,9 @@ void hook(ID3D11Device** ppDevice) {
 
 			D3D11_GIC origGIC = (D3D11_GIC)(*vTable)[40];
 
-			cHookMgr.Hook(&(sCreateVertexShader_Hook.nHookId), (LPVOID*)&(sCreateVertexShader_Hook.fnCreateVertexShader), origVS, D3D11_CreateVertexShader);
+			cHookMgr.Hook(&(sCreateVertexShader_Hook.nHookId), (LPVOID*)&(sCreateVertexShader_Hook.fn), origVS, D3D11_CreateVertexShader);
 
-			cHookMgr.Hook(&(sGetImmediateContext_Hook.nHookId), (LPVOID*)&(sGetImmediateContext_Hook.fnGetImmediateContext), origGIC, D3D11_GetImmediateContext);
+			cHookMgr.Hook(&(sGetImmediateContext_Hook.nHookId), (LPVOID*)&(sGetImmediateContext_Hook.fn), origGIC, D3D11_GetImmediateContext);
 
 			IDXGIFactory1 * pFactory;
 			HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)(&pFactory));
@@ -247,11 +372,7 @@ void InitInstance() {
 		} while (!IsDebuggerPresent());
 	}
 
-	gl_dumpBin = GetPrivateProfileInt("Rendering", "export_binary", gl_dumpBin, INIfile) > 0;
 	gl_log = GetPrivateProfileInt("Logging", "calls", gl_log, INIfile) > 0;
-	gl_cache_shaders = GetPrivateProfileInt("Rendering", "cache_shaders", gl_cache_shaders, INIfile) > 0;
-
-	
 
 	if (gl_log) {
 		if (LogFile == NULL) {

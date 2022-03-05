@@ -31,11 +31,6 @@ HRESULT WINAPI D3D11CreateDeviceAndSwapChain(
 	);
 // regular functions
 void hook(ID3D11DeviceContext** ppContext);
-void frameFunction();
-HRESULT CreateStereoParamTextureAndView(ID3D11Device* d3d11);
 void InitInstance();
 void ExitInstance();
 void LoadOriginalDll();
-void ShowStartupScreen();
-
-const int INI_PARAMS_SIZE = 8;
