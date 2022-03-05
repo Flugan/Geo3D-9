@@ -1,17 +1,7 @@
 // proxydll.cpp
 #include "stdafx.h"
-#include "proxydll.h"
-#define NO_STEREO_D3D9
-#define NO_STEREO_D3D10
-#include "..\nvstereo.h"
-#include <Xinput.h>
-#include <D3Dcompiler.h>
-#include <DirectXMath.h>
-#define _USE_MATH_DEFINES
-#include <math.h>
 #include "resource.h"
 #include "..\Nektra\NktHookLib.h"
-#include "..\vkeys.h"
 #include "..\log.h"
 
 // global variables
@@ -22,7 +12,6 @@ bool				gl_hookedDevice = false;
 bool				gl_hookedContext = false;
 bool				gl_log = false;
 bool				gl_left = true;
-CRITICAL_SECTION	gl_CS;
 FILE*				LogFile = NULL;
 string				sep = "0.1";
 string				conv = "1.0";
@@ -72,9 +61,6 @@ static UINT64 fnv_64_buf(const void *buf, size_t len)
 	}
 	return hval;
 }
-
-char cwd[MAX_PATH];
-
 
 string changeASM(vector<byte> ASM, bool left) {
 	auto lines = stringToLines((char*)ASM.data(), ASM.size());
@@ -163,8 +149,13 @@ static struct {
 	D3D11_VS fn;
 } sCreateVertexShader_Hook = { 0, NULL };
 HRESULT STDMETHODCALLTYPE D3D11_CreateVertexShader(ID3D11Device* This, const void* pShaderBytecode, SIZE_T BytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11VertexShader** ppVertexShader) {
+	UINT64 crc = fnv_64_buf(pShaderBytecode, BytecodeLength);
 	HRESULT hr;
 	vector<byte> v;
+	vector<byte> a;
+	VSO vso = {};
+	vso.crc = crc;
+
 	byte* bArray = (byte*)pShaderBytecode;
 	for (int i = 0; i < BytecodeLength; i++) {
 		v.push_back(bArray[i]);
@@ -174,16 +165,14 @@ HRESULT STDMETHODCALLTYPE D3D11_CreateVertexShader(ID3D11Device* This, const voi
 	string shaderL = changeASM(ASM, true);
 	string shaderR = changeASM(ASM, false);
 
+	
+
 	if (shaderL == "") {
 		hr = sCreateVertexShader_Hook.fn(This, pShaderBytecode, BytecodeLength, pClassLinkage, ppVertexShader);
-		VSO vso = {};
 		vso.Neutral = (ID3D11VertexShader*)*ppVertexShader;
 		VSOmap[vso.Neutral] = vso;
 		return hr;
 	}
-
-	vector<byte> a;
-	VSO vso = {};
 
 	a.clear();
 	for (int i = 0; i < shaderL.length(); i++) {
@@ -223,11 +212,11 @@ void STDMETHODCALLTYPE D3D11C_VSSetShader(ID3D11DeviceContext* This, ID3D11Verte
 	if (VSOmap.count(pVertexShader) == 1) {
 		VSO* vso = &VSOmap[pVertexShader];
 		if (vso->Neutral) {
-			LogInfo("No output VS\n");
+			LogInfo("No output VS: %016llX\n", vso->crc);
 			sVSSetShader_Hook.fn(This, vso->Neutral, ppClassInstances, NumClassInstances);
 		}
 		else {
-			LogInfo("Stereo VS\n");
+			LogInfo("Stereo VS: %016llX\n", vso->crc);
 			if (gl_left) {
 				sVSSetShader_Hook.fn(This, vso->Left, ppClassInstances, NumClassInstances);
 			}
@@ -357,12 +346,9 @@ void InitInstance() {
 	char INIfile[MAX_PATH];
 	char LOGfile[MAX_PATH];
 
-	InitializeCriticalSection(&gl_CS);
-
 	_getcwd(INIfile, MAX_PATH);
 	_getcwd(LOGfile, MAX_PATH);
 	strcat_s(INIfile, MAX_PATH, "\\d3dx.ini");
-	_getcwd(cwd, MAX_PATH);
 
 	// If specified in Debug section, wait for Attach to Debugger.
 	bool waitfordebugger = GetPrivateProfileInt("Debug", "attach", 0, INIfile) > 0;
