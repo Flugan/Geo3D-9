@@ -66,8 +66,7 @@ BOOL APIENTRY DllMain( HANDLE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 	{
 	    case DLL_PROCESS_ATTACH:
 			gl_hThisInstance = (HINSTANCE)hModule;
-			ShowStartupScreen();
-			//InitInstance();
+			InitInstance();
 			break;
 	    case DLL_PROCESS_DETACH: ExitInstance(); break;
         
@@ -745,13 +744,13 @@ void LoadOriginalDll(void)
 {
     char buffer[MAX_PATH];
     
-    // Getting path to system dir and to d3d8.dll
+    // Getting path to system dir and to d3d9.dll
 	::GetSystemDirectory(buffer,MAX_PATH);
 
 	// Append dll name
 	strcat_s(buffer, 80, "\\d3d9.dll");
 	
-	// try to load the system's d3d10.dll, if pointer empty
+	// try to load the system's d3d9.dll, if pointer empty
 	if (!gl_hOriginalDll) gl_hOriginalDll = ::LoadLibrary(buffer);
 }
 
