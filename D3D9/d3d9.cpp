@@ -551,69 +551,6 @@ void hook(IDirect3D9* direct9) {
 	}
 }
 
-void ShowStartupScreen()
-{
-	HBITMAP hBM = ::LoadBitmap(gl_hThisInstance, MAKEINTRESOURCE(IDB_STARTUP));
-	if (hBM) {
-		HDC hDC = ::GetDC(NULL);
-		if (hDC) {
-			int iXPos = (::GetDeviceCaps(hDC, HORZRES) / 2) - (128 / 2);
-			int iYPos = (::GetDeviceCaps(hDC, VERTRES) / 2) - (128 / 2);
-
-			// paint the "GPP active" sign on desktop
-			HDC hMemDC = ::CreateCompatibleDC(hDC);
-			HBITMAP hBMold = (HBITMAP) ::SelectObject(hMemDC, hBM);
-			::BitBlt(hDC, iXPos, iYPos, 128, 128, hMemDC, 0, 0, SRCCOPY);
-
-			//Cleanup
-			::SelectObject(hMemDC, hBMold);
-			::DeleteDC(hMemDC);
-			::ReleaseDC(NULL, hDC);
-
-			// Wait 2 seconds before proceeding
-			::Sleep(2000);
-		}
-		::DeleteObject(hBM);
-	}
-	
-	// Single shader compile
-	FILE* f;
-	fopen_s(&f, "shader.asm", "rb");
-	if (f) {
-		size_t bsize = 1024 * 1024;
-		DWORD pFunction[1024 * 1024];
-		fread_s(pFunction, 4 * bsize, 4, bsize, f);
-		fclose(f);
-
-		int i;
-		for (i = 0; pFunction[i] != 0xFFFF; i++) {}
-		i++;
-		LPD3DXBUFFER pDisassembly = NULL;
-		HRESULT dRes = D3DXDisassembleShader(pFunction, FALSE, NULL, &pDisassembly);
-		LPVOID pShaderBytecode = pDisassembly->GetBufferPointer();
-		DWORD BytecodeLength = pDisassembly->GetBufferSize();
-
-		fopen_s(&f, "shaderOut.txt", "wb");
-		fwrite(pShaderBytecode, 1, BytecodeLength, f);
-		fclose(f);
-	}
-	fopen_s(&f, "shader.txt", "rb");
-	if (f) {
-		size_t bsize = 1024 * 1024;
-		char* shader = new char[1024 * 1024];
-		size_t size = fread_s(shader, bsize, 1, bsize, f);
-		fclose(f);
-		LPD3DXBUFFER pAssembly;
-		D3DXAssembleShader(shader, size, NULL, NULL, 0, &pAssembly, NULL);
-		if (pAssembly != NULL) {
-			pAssembly->GetBufferPointer();
-			fopen_s(&f, "shaderOut.asm", "wb");
-			fwrite(pAssembly->GetBufferPointer(), 1, pAssembly->GetBufferSize(), f);
-			fclose(f);
-		}
-	}
-}
-
 // Exported function (faking d3d9.dll's export)
 IDirect3D9* WINAPI Direct3DCreate9(UINT SDKVersion) {
 	if (!gl_hOriginalDll) LoadOriginalDll(); // looking for the "right d3d9.dll"
@@ -733,7 +670,6 @@ void InitInstance()
 		if (LogFile == NULL) {
 			strcat_s(LOGfile, MAX_PATH, "\\d3d9_log.txt");
 			LogFile = _fsopen(LOGfile, "w", _SH_DENYNO);
-			setvbuf(LogFile, NULL, _IONBF, 0);
 		}
 	}
 
