@@ -3,11 +3,7 @@
 #include "proxydll.h"
 #include "..\log.h"
 #include "..\vkeys.h"
-#include "resource.h"
 #include "..\Nektra\NktHookLib.h"
-#define NO_STEREO_D3D11
-#define NO_STEREO_D3D10
-#include "..\nvstereo.h"
 
 // global variables
 #pragma data_seg (".d3d9_shared")
@@ -29,11 +25,18 @@ bool				gl_dump = false;
 bool				gl_patch = true;
 bool				gl_log = false;
 bool				gl_hunt = false;
+bool				gl_left = true;
 FILE*				LogFile = NULL;
 char				cwd[MAX_PATH];
-nv::stereo::ParamTextureManagerD3D9 *gStereoTexMgr = NULL;
-IDirect3DTexture9 *	gStereoTexture;
-bool gInitGfx = false;
+
+float gSep;
+float gConv;
+float gEyeDist;
+float gScreenSize;
+float gFinalSep;
+
+IDirect3DTexture9*	gStereoTextureLeft;
+IDirect3DTexture9* gStereoTextureRight;
 #pragma data_seg ()
 
 CNktHookLib cHookMgr;
@@ -190,7 +193,10 @@ HRESULT STDMETHODCALLTYPE D3D9_VSSetShader(IDirect3DDevice9 * This, IDirect3DVer
 		currentVS = _crc;
 	}
 	HRESULT hr = sVSSS_Hook.fnVSSS(This, pShader);
-	This->SetTexture(D3DVERTEXTEXTURESAMPLER0, gStereoTexture);
+	if (gl_left)
+		This->SetTexture(D3DVERTEXTEXTURESAMPLER0, gStereoTextureLeft);
+	else
+		This->SetTexture(D3DVERTEXTEXTURESAMPLER0, gStereoTextureRight);
 	return hr;
 }
 
@@ -204,19 +210,99 @@ HRESULT STDMETHODCALLTYPE D3D9_PSSetShader(IDirect3DDevice9 * This, IDirect3DPix
 		currentPS = _crc;
 	}
 	HRESULT hr = sPSSS_Hook.fnPSSS(This, pShader);
-	This->SetTexture(0, gStereoTexture);
+	if (gl_left)
+		This->SetTexture(0, gStereoTextureLeft);
+	else
+		This->SetTexture(0, gStereoTextureRight);
 	return hr;
 }
 
-HRESULT CreateStereoParamTexture(IDirect3DDevice9* d3d9)
+inline void PopulateTextureData(float* eye, unsigned int width, unsigned int height, unsigned int pixelBytes, float eyeSep, float sep, float conv)
 {
-	// This function creates a texture that is suitable to be stereoized by the driver.
-	// Note that the parameters primarily come from nvstereo.h
-	using nv::stereo::ParamTextureManagerD3D9;
-	
-	d3d9->CreateTexture(ParamTextureManagerD3D9::Parms::StereoTexWidth,
-		ParamTextureManagerD3D9::Parms::StereoTexHeight, 1, D3DUSAGE_DYNAMIC,
-		ParamTextureManagerD3D9::Parms::StereoTexFormat, D3DPOOL_DEFAULT, &gStereoTexture, NULL);
+	// Normally sep is in [0, 100], and we want the fractional part of 1. 
+	float finalSeparation = eyeSep * sep * 0.01f;
+	if (gl_left) {
+		eye[0] = -finalSeparation;
+		eye[1] = conv;
+		eye[2] = 1.0f;
+	}
+	else {
+		eye[0] = finalSeparation;
+		eye[1] = conv;
+		eye[2] = -1.0f;
+	}
+}
+
+typedef IDirect3DDevice9 Device;
+typedef IDirect3DTexture9 Texture;
+typedef IDirect3DSurface9 StagingResource;
+
+// Note that the texture must be at least 20 bytes wide to handle the stereo header.
+static const int StereoTexWidth = 8;
+static const int StereoTexHeight = 1;
+static const D3DFORMAT StereoTexFormat = D3DFMT_A32B32G32R32F;
+static const int StereoBytesPerPixel = 16;
+
+static StagingResource* CreateStagingResource(Device* pDevice, float eyeSep, float sep, float conv)
+{
+	StagingResource* staging = 0;
+	unsigned int stagingWidth = StereoTexWidth;
+	unsigned int stagingHeight = StereoTexHeight;
+
+	pDevice->CreateOffscreenPlainSurface(stagingWidth, stagingHeight, StereoTexFormat, D3DPOOL_SYSTEMMEM, &staging, NULL);
+
+	if (!staging) {
+		return 0;
+	}
+
+	D3DLOCKED_RECT lr;
+	staging->LockRect(&lr, NULL, 0);
+	unsigned char* sysData = (unsigned char*)lr.pBits;
+	unsigned int sysMemPitch = stagingWidth * StereoBytesPerPixel;
+
+	float* leftEyePtr = (float*)sysData;
+	PopulateTextureData(leftEyePtr, stagingWidth, stagingHeight, StereoBytesPerPixel, eyeSep, sep, conv);
+	staging->UnlockRect();
+
+	return staging;
+}
+
+static void UpdateTextureFromStaging(Device* pDevice, Texture* tex, StagingResource* staging)
+{
+	RECT stereoSrcRect;
+	stereoSrcRect.top = 0;
+	stereoSrcRect.bottom = StereoTexHeight;
+	stereoSrcRect.left = 0;
+	stereoSrcRect.right = StereoTexWidth;
+
+	POINT stereoDstPoint;
+	stereoDstPoint.x = 0;
+	stereoDstPoint.y = 0;
+
+	IDirect3DSurface9* texSurface;
+	tex->GetSurfaceLevel(0, &texSurface);
+
+	pDevice->UpdateSurface(staging, &stereoSrcRect, texSurface, &stereoDstPoint);
+	texSurface->Release();
+}
+
+HRESULT CreateStereoParamTexture(IDirect3DDevice9* d3d9)
+{	
+	float eyeSep = gEyeDist / (2.54f * gScreenSize * 16 / sqrtf(256 + 81));
+	gl_left = true;
+	d3d9->CreateTexture(8, 1, 1, D3DUSAGE_DYNAMIC, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &gStereoTextureLeft, NULL);
+	StagingResource* staging = CreateStagingResource(d3d9, eyeSep, gSep, gConv);
+	if (staging) {
+		UpdateTextureFromStaging(d3d9, gStereoTextureLeft, staging);
+		staging->Release();
+	}
+	gl_left = false;
+	d3d9->CreateTexture(8, 1, 1, D3DUSAGE_DYNAMIC, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &gStereoTextureRight, NULL);
+	staging = CreateStagingResource(d3d9, eyeSep, gSep, gConv);
+	if (staging) {
+		UpdateTextureFromStaging(d3d9, gStereoTextureRight, staging);
+		staging->Release();
+	}
 	return S_OK;
 }
 
@@ -224,17 +310,9 @@ map<uint32_t, IDirect3DPixelShader9*> PresentPS;
 map<uint32_t, IDirect3DVertexShader9*> PresentVS;
 uint32_t PS_hash = 0;
 uint32_t VS_hash = 0;
-uint32_t test = 0;
-uint32_t limit = 2;
 HRESULT STDMETHODCALLTYPE D3D9_Present(IDirect3DDevice9 * This, CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion) {
-	if (test < limit)
-		test++;
-	if (test == limit) {
-		test++;
-		CreateStereoParamTexture(This);
-	}
-	if (test > limit)
-		gStereoTexMgr->UpdateStereoTexture(This, gStereoTexture, false);
+	gl_left != gl_left;
+
 	frameFunction();
 
 	if (RunningVS.size() == 0 && RunningPS.size() == 0) {
@@ -280,14 +358,12 @@ HRESULT STDMETHODCALLTYPE D3D9_DrawPrimitiveUP(IDirect3DDevice9 * This, D3DPRIMI
 		return sDrawPrimitiveUP_Hook.fnDrawPrimitiveUP(This, PrimitiveType, PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
 }
 
-/*
 HRESULT STDMETHODCALLTYPE D3D9_DrawIndexedPrimitiveUP(IDirect3DDevice9 * This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride) {
 	if (beforeDraw())
 		return S_OK;
 	else
 		return sDrawIndexedPrimitiveUP_Hook.fnDrawIndexedPrimitiveUP(This, PrimitiveType, PrimitiveCount, NumVertices, PrimitiveCount, pIndexData, IndexDataFormat, pVertexStreamZeroData, VertexStreamZeroStride);
 }
-*/
 
 enum buttonPress { Unchanged, Down, Up };
 
@@ -513,7 +589,7 @@ void hook(IDirect3DDevice9** ppDevice) {
 		cHookMgr.Hook(&(sDrawPrimitive_Hook.nHookId), (LPVOID*)&(sDrawPrimitive_Hook.fnDrawPrimitive), gl_origDP, D3D9_DrawPrimitive);
 		cHookMgr.Hook(&(sDrawIndexedPrimitive_Hook.nHookId), (LPVOID*)&(sDrawIndexedPrimitive_Hook.fnDrawIndexedPrimitive), gl_origDIP, D3D9_DrawIndexedPrimitive);
 		cHookMgr.Hook(&(sDrawPrimitiveUP_Hook.nHookId), (LPVOID*)&(sDrawPrimitiveUP_Hook.fnDrawPrimitiveUP), gl_origDPUP, D3D9_DrawPrimitiveUP);
-		//cHookMgr.Hook(&(sDrawIndexedPrimitiveUP_Hook.nHookId), (LPVOID*)&(sDrawIndexedPrimitiveUP_Hook.fnDrawIndexedPrimitiveUP), gl_origDIPUP, D3D9_DrawIndexedPrimitiveUP);
+		cHookMgr.Hook(&(sDrawIndexedPrimitiveUP_Hook.nHookId), (LPVOID*)&(sDrawIndexedPrimitiveUP_Hook.fnDrawIndexedPrimitiveUP), gl_origDIPUP, D3D9_DrawIndexedPrimitiveUP);
 
 		cHookMgr.Hook(&(sCreateVS_Hook.nHookId), (LPVOID*)&(sCreateVS_Hook.fnCreateVS), gl_origVS, D3D9_CreateVS);
 		cHookMgr.Hook(&(sCreatePS_Hook.nHookId), (LPVOID*)&(sCreatePS_Hook.fnCreatePS), gl_origPS, D3D9_CreatePS);
@@ -524,8 +600,9 @@ void hook(IDirect3DDevice9** ppDevice) {
 
 		gl_hooked2 = true;
 	}
-	gInitGfx = true;
-	gStereoTexMgr->Init(*ppDevice);
+	if (ppDevice != NULL) {
+		CreateStereoParamTexture(*ppDevice);
+	}
 }
 
 HRESULT STDMETHODCALLTYPE D3D9_CreateDevice(
@@ -560,7 +637,7 @@ IDirect3D9* WINAPI Direct3DCreate9(UINT SDKVersion) {
 	D3D9_Type Direct3DCreate9_fn = (D3D9_Type)GetProcAddress(gl_hOriginalDll, "Direct3DCreate9");
 
 	IDirect3D9* direct9 = Direct3DCreate9_fn(SDKVersion);
-	//hook(direct9);
+	hook(direct9);
 	return direct9;
 }
 
@@ -636,8 +713,23 @@ void InitInstance()
 	strcat_s(INIfile, MAX_PATH, "\\d3dx.ini");
 
 	gl_log = GetPrivateProfileInt("Logging", "calls", gl_log, INIfile) > 0;
+
 	gl_hunt = GetPrivateProfileInt("Hunting", "hunting", gl_hunt, INIfile) > 0;
+
 	gl_dump = GetPrivateProfileInt("Rendering", "export_binary", gl_dump, INIfile) > 0;
+
+	if (GetPrivateProfileString("StereoSettings", "StereoSeparation", "50", setting, MAX_PATH, INIfile)) {
+		gSep = stof(setting);
+	}
+	if (GetPrivateProfileString("StereoSettings", "StereoConvergence", "1.0", setting, MAX_PATH, INIfile)) {
+		gConv = stof(setting);
+	}
+	if (GetPrivateProfileString("StereoSettings", "EyeDistance", "6.3", setting, MAX_PATH, INIfile)) {
+		gEyeDist = stof(setting);
+	}
+	if (GetPrivateProfileString("StereoSettings", "ScreenSize", "55", setting, MAX_PATH, INIfile)) {
+		gScreenSize = stof(setting);
+	}
 
 	if (gl_dump) {
 		CreateDirectory("Dumps", NULL);
@@ -672,8 +764,6 @@ void InitInstance()
 			LogFile = _fsopen(LOGfile, "w", _SH_DENYNO);
 		}
 	}
-
-	gStereoTexMgr = new nv::stereo::ParamTextureManagerD3D9;
 }
 
 void LoadOriginalDll(void)

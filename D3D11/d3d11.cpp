@@ -1,6 +1,5 @@
 // proxydll.cpp
 #include "stdafx.h"
-#include "resource.h"
 #include "..\Nektra\NktHookLib.h"
 #include "..\log.h"
 
