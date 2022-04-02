@@ -12,3 +12,11 @@
 #include "D3Dcompiler.h"
 #include <map>
 #include <vector>
+
+struct VSO {
+	IDirect3DVertexShader9* Left;
+	IDirect3DVertexShader9* Neutral;
+	IDirect3DVertexShader9* Right;
+};
+
+std::map<IDirect3DVertexShader9*, VSO> VSOmap;
