@@ -79,6 +79,85 @@ BOOL APIENTRY DllMain( HANDLE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     return TRUE;
 }
 
+vector<string> stringToLines(const char* start, int size) {
+	vector<string> lines;
+	const char* pStart = start;
+	const char* pEnd = pStart;
+	const char* pRealEnd = pStart + size;
+	while (true) {
+		while (*pEnd != '\n' && pEnd < pRealEnd) {
+			pEnd++;
+		}
+		if (*pStart == 0) {
+			break;
+		}
+		string s(pStart, pEnd++);
+		pStart = pEnd;
+		lines.push_back(s);
+		if (pStart >= pRealEnd) {
+			break;
+		}
+	}
+	for (unsigned int i = 0; i < lines.size(); i++) {
+		string s = lines[i];
+		if (s.size() > 1 && s[s.size() - 1] == '\r')
+			s.erase(--s.end());
+		lines[i] = s;
+	}
+	return lines;
+}
+
+string changeASM(vector<byte> ASM, bool left) {
+	auto lines = stringToLines((char*)ASM.data(), ASM.size());
+	string shader;
+	string oReg;
+	bool dcl = false;
+	bool dcl_ICB = false;
+	int temp = 0;
+	for (int i = 0; i < lines.size(); i++) {
+		string s = lines[i];
+		if (s.find("dcl") != string::npos) {
+			dcl = true;
+			auto pos = s.find("dcl_output o");
+			if (pos != string::npos) {
+				oReg = s.substr(pos + 11, 2);
+				shader += s + "\n";
+			}
+			else {
+				shader += s + "\n";
+			}
+		}
+		else if (dcl == true) {
+			// after dcl
+			if (oReg.size() == 0) {
+				// no output
+				return "";
+			}
+			shader += s + "\n";
+
+			auto pos = s.find("mov " + oReg);
+			if (pos != string::npos) {
+				string sourceReg = s.substr(pos + 8, 2);
+				char buf[80];
+				sprintf_s(buf, 80, "%.8f", gFinalSep);
+				string sep(buf);
+				sprintf_s(buf, 80, "%.3f", gConv);
+				string conv(buf);
+				string changeSep = left ? "l(-" + sep + ")" : "l(" + sep + ")";
+				shader +=
+					"add r11.x, " + sourceReg + ".w, l(-" + conv + ")\n" +
+					"mad r11.x, r11.x, " + changeSep + ", r" + sourceReg + ".x\n" +
+					"mov " + oReg + ".x, r11.x\n";
+			}
+		}
+		else {
+			// before dcl
+			shader += s + "\n";
+		}
+	}
+	return shader;
+}
+
 map <uint32_t, vector<byte>*> origShaderData;
 
 map<IDirect3DVertexShader9*, uint32_t> ShaderMapVS;
@@ -90,7 +169,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 	HRESULT dRes = D3DXDisassembleShader(pFunction, FALSE, NULL, &pDisassembly);
 	LPVOID pShaderBytecode = pDisassembly->GetBufferPointer();
 	DWORD BytecodeLength = pDisassembly->GetBufferSize();
-	char buffer[80];
+	char buffer[MAX_PATH];
 	FILE* f;
 	uint32_t _crc = crc32_fast(pFunction, 4 * i, 0);
 
@@ -101,35 +180,90 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 	origShaderData[_crc] = v;
 
 	if (gl_dump) {
-		sprintf_s(buffer, 80, "Dumps\\AllShaders\\VertexShaders\\%08X.txt", _crc);
+		sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.txt", _crc);
 		fopen_s(&f, buffer, "wb");
 		fwrite(pShaderBytecode, 1, BytecodeLength, f);
 		fclose(f);
 
-		sprintf_s(buffer, 80, "Dumps\\AllShaders\\VertexShaders\\%08X.bin", _crc);
-		fopen_s(&f, buffer, "wb");
-		fwrite(pFunction, 4, i, f);
-		fclose(f);
+		//sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.bin", _crc);
+		//fopen_s(&f, buffer, "wb");
+		//fwrite(pFunction, 4, i, f);
+		//fclose(f);
 	}
+	bool deleteV = false;
 	if (gl_patch) {
-		sprintf_s(buffer, 80, "shaderoverride\\vertexshaders\\%08X.txt", _crc);
+		sprintf_s(buffer, MAX_PATH, "shaderoverride\\vertexshaders\\%08X.txt", _crc);
 		fopen_s(&f, buffer, "rb");
 		if (f != NULL) {
-			char* shader = new char[BytecodeLength * 2];
-			size_t size = fread(shader, 1, BytecodeLength * 2, f);
+			byte* shader = new byte[BytecodeLength * 4];
+			size_t size = fread(shader, 1, BytecodeLength * 4, f);
 			fclose(f);
-			LPD3DXBUFFER pAssembly;
-			D3DXAssembleShader(shader, size, NULL, NULL, 0, &pAssembly, NULL);
-			if (pAssembly != NULL)  {
-				HRESULT hr = sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
-				ShaderMapVS[*ppShader] = _crc;
-				return hr;
-			}
+			v = new vector<byte>(size);
+			copy(shader, shader + size, v->begin());
+			delete[] shader;
+			deleteV = true;
 		}
 	}
-	HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
-	ShaderMapVS[*ppShader] = _crc;
-	return hr;
+
+	string asmLeft = changeASM(*v, true);
+	string asmRight = changeASM(*v, false);
+
+	sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.txt", _crc);
+	fopen_s(&f, buffer, "wb");
+	fwrite(pShaderBytecode, 1, BytecodeLength, f);
+	fclose(f);
+
+	sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.left", _crc);
+	fopen_s(&f, buffer, "wb");
+	fwrite(asmLeft.data(), 1, asmLeft.size(), f);
+	fclose(f);
+
+	sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.right", _crc);
+	fopen_s(&f, buffer, "wb");
+	fwrite(asmRight.data(), 1, asmRight.size(), f);
+	fclose(f);
+
+	if (deleteV)
+		delete v;
+	if (asmLeft == "") {
+		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
+		ShaderMapVS[*ppShader] = _crc;
+		VSO vso = {};
+		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
+		VSOmap[vso.Neutral] = vso;
+		return hr;
+	}
+	VSO vso = {};
+	LPD3DXBUFFER pAssembly;
+	D3DXAssembleShader(asmLeft.c_str(), asmLeft.size(), NULL, NULL, 0, &pAssembly, NULL);
+	if (pAssembly != NULL) {
+		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
+		vso.Left = (IDirect3DVertexShader9*)*ppShader;
+	}
+	else {
+		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
+		ShaderMapVS[*ppShader] = _crc;
+		VSO vso = {};
+		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
+		VSOmap[vso.Neutral] = vso;
+		return hr;
+	}
+	D3DXAssembleShader(asmRight.c_str(), asmRight.size(), NULL, NULL, 0, &pAssembly, NULL);
+	if (pAssembly != NULL) {
+		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
+		ShaderMapVS[*ppShader] = _crc;
+		vso.Right = (IDirect3DVertexShader9*)*ppShader;
+		VSOmap[vso.Right];
+		return hr;
+	}
+	else {
+		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
+		ShaderMapVS[*ppShader] = _crc;
+		VSO vso = {};
+		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
+		VSOmap[vso.Neutral] = vso;
+		return hr;
+	}
 }
 
 map<IDirect3DPixelShader9*, uint32_t> ShaderMapPS;
@@ -141,7 +275,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreatePS(IDirect3DDevice9 * This, CONST DWORD* pF
 	HRESULT dRes = D3DXDisassembleShader(pFunction, FALSE, NULL, &pDisassembly);
 	LPVOID pShaderBytecode = pDisassembly->GetBufferPointer();
 	DWORD BytecodeLength = pDisassembly->GetBufferSize();
-	char buffer[80];
+	char buffer[MAX_PATH];
 	FILE* f;
 	uint32_t _crc = crc32_fast(pFunction, 4 * i, 0);
 
@@ -152,22 +286,22 @@ HRESULT STDMETHODCALLTYPE D3D9_CreatePS(IDirect3DDevice9 * This, CONST DWORD* pF
 	origShaderData[_crc] = v;
 
 	if (gl_dump) {
-		sprintf_s(buffer, 80, "Dumps\\AllShaders\\PixelShaders\\%08X.txt", _crc);
+		sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\PixelShaders\\%08X.txt", _crc);
 		fopen_s(&f, buffer, "wb");
 		fwrite(pShaderBytecode, 1, BytecodeLength, f);
 		fclose(f);
 
-		sprintf_s(buffer, 80, "Dumps\\AllShaders\\PixelShaders\\%08X.bin", _crc);
-		fopen_s(&f, buffer, "wb");
-		fwrite(pFunction, 4, i, f);
-		fclose(f);
+		//sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\PixelShaders\\%08X.bin", _crc);
+		//fopen_s(&f, buffer, "wb");
+		//fwrite(pFunction, 4, i, f);
+		//fclose(f);
 	}
 	if (gl_patch) {
-		sprintf_s(buffer, 80, "shaderoverride\\pixelshaders\\%08X.txt", _crc);
+		sprintf_s(buffer, MAX_PATH, "shaderoverride\\pixelshaders\\%08X.txt", _crc);
 		fopen_s(&f, buffer, "rb");
 		if (f != NULL) {
-			char* shader = new char[BytecodeLength * 2];
-			size_t size = fread(shader, 1, BytecodeLength * 2, f);
+			char* shader = new char[BytecodeLength * 4];
+			size_t size = fread(shader, 1, BytecodeLength * 4, f);
 			fclose(f);
 			LPD3DXBUFFER pAssembly;
 			D3DXAssembleShader(shader, size, NULL, NULL, 0, &pAssembly, NULL);
@@ -192,11 +326,31 @@ HRESULT STDMETHODCALLTYPE D3D9_VSSetShader(IDirect3DDevice9 * This, IDirect3DVer
 		RunningVS[_crc] = pShader;
 		currentVS = _crc;
 	}
-	HRESULT hr = sVSSS_Hook.fnVSSS(This, pShader);
-	if (gl_left)
+	HRESULT hr;
+	if (VSOmap.count(pShader) == 1) {
+		VSO* vso = &VSOmap[pShader];
+		if (vso->Neutral) {
+			LogInfo("No stereo VS\n");
+			hr = sVSSS_Hook.fnVSSS(This, vso->Neutral);
+		}
+		else {
+			LogInfo("Stereo VS\n");
+			if (gl_left) {
+				hr = sVSSS_Hook.fnVSSS(This, vso->Left);
+			}
+			else {
+				hr = sVSSS_Hook.fnVSSS(This, vso->Right);
+			}
+		}
+	}
+	else {
+		LogInfo("Unknown VS\n");
+		hr = sVSSS_Hook.fnVSSS(This, pShader);
+	}
+	/*if (gl_left)
 		This->SetTexture(D3DVERTEXTEXTURESAMPLER0, gStereoTextureLeft);
 	else
-		This->SetTexture(D3DVERTEXTEXTURESAMPLER0, gStereoTextureRight);
+		This->SetTexture(D3DVERTEXTEXTURESAMPLER0, gStereoTextureRight);*/
 	return hr;
 }
 
@@ -210,10 +364,10 @@ HRESULT STDMETHODCALLTYPE D3D9_PSSetShader(IDirect3DDevice9 * This, IDirect3DPix
 		currentPS = _crc;
 	}
 	HRESULT hr = sPSSS_Hook.fnPSSS(This, pShader);
-	if (gl_left)
+	/*if (gl_left)
 		This->SetTexture(0, gStereoTextureLeft);
 	else
-		This->SetTexture(0, gStereoTextureRight);
+		This->SetTexture(0, gStereoTextureRight);*/
 	return hr;
 }
 
