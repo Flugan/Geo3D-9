@@ -59,21 +59,21 @@ static UINT64 fnv_64_buf(const void *buf, size_t len)
 BOOL APIENTRY DllMain( HANDLE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
 	// to avoid compiler lvl4 warnings 
-    LPVOID lpDummy = lpReserved;
-    lpDummy = NULL;
+	LPVOID lpDummy = lpReserved;
+	lpDummy = NULL;
 
-    switch (ul_reason_for_call)
+	switch (ul_reason_for_call)
 	{
-	    case DLL_PROCESS_ATTACH:
-			gl_hThisInstance = (HINSTANCE)hModule;
-			InitInstance();
-			break;
-	    case DLL_PROCESS_DETACH: ExitInstance(); break;
-        
-        case DLL_THREAD_ATTACH:  break;
-	    case DLL_THREAD_DETACH:  break;
+	case DLL_PROCESS_ATTACH:
+		gl_hThisInstance = (HINSTANCE)hModule;
+		InitInstance();
+		break;
+	case DLL_PROCESS_DETACH: ExitInstance(); break;
+
+	case DLL_THREAD_ATTACH:  break;
+	case DLL_THREAD_DETACH:  break;
 	}
-    return TRUE;
+	return TRUE;
 }
 
 vector<string> stringToLines(const char* start, int size) {
@@ -105,6 +105,15 @@ vector<string> stringToLines(const char* start, int size) {
 }
 
 string changeASM(vector<byte> ASM, bool left) {
+	string reg((char*)ASM.data(), ASM.size());
+	int tempReg = 10;
+	for (int i = 0; i < 10; i++) {
+		if (reg.find("r" + i) == string::npos) {
+			tempReg = i;
+			break;
+		}
+	}
+	LogInfo("changeASM %d %d", tempReg, left);
 	auto lines = stringToLines((char*)ASM.data(), ASM.size());
 	string shader;
 	string oReg;
@@ -131,10 +140,25 @@ string changeASM(vector<byte> ASM, bool left) {
 				return "";
 			}
 			shader += s + "\n";
-
-			auto pos = s.find("mov " + oReg);
+			auto pos = s.find(oReg);
 			if (pos != string::npos) {
-				string sourceReg = s.substr(pos + 8, 2);
+				string reg = "r" + to_string(tempReg);
+				for (int j = 0; j < s.size(); i++) {
+					if (j < pos) {
+						shader += s[j];
+					}
+					else if (j == pos) {
+						shader += reg;
+					}
+					else if (j > pos + 1) {
+						shader += s[j];
+					}
+				}
+				shader += "\n";
+			}
+			if (i == (lines.size() - 2)) {
+				string sourceReg = "r" + tempReg;
+				string calcReg = "r" + (tempReg + 1);
 				char buf[80];
 				sprintf_s(buf, 80, "%.8f", gFinalSep);
 				string sep(buf);
@@ -142,9 +166,10 @@ string changeASM(vector<byte> ASM, bool left) {
 				string conv(buf);
 				string changeSep = left ? "l(-" + sep + ")" : "l(" + sep + ")";
 				shader +=
-					"    add r11.x, " + sourceReg + ".w, l(-" + conv + ")\n" +
-					"    mad r11.x, r11.x, " + changeSep + ", " + sourceReg + ".x\n" +
-					"    mov " + oReg + ".x, r11.x\n";
+				"    mov " + calcReg + ", " + sourceReg + "\n" +
+				"    add " + calcReg + ".x, " + sourceReg + ".w, l(-" + conv + ")\n" +
+				"    mad " + calcReg + ".x, " + calcReg + ".x, " + changeSep + ", " + sourceReg + ".x\n" +
+				"    mov " + oReg + ", " + calcReg + "\n";
 			}
 		}
 		else {
