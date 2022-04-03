@@ -34,9 +34,6 @@ float gConv;
 float gEyeDist;
 float gScreenSize;
 float gFinalSep;
-
-IDirect3DTexture9*	gStereoTextureLeft;
-IDirect3DTexture9* gStereoTextureRight;
 #pragma data_seg ()
 
 CNktHookLib cHookMgr;
@@ -118,9 +115,9 @@ string changeASM(vector<byte> ASM, bool left) {
 		string s = lines[i];
 		if (s.find("dcl") != string::npos) {
 			dcl = true;
-			auto pos = s.find("dcl_output o");
+			auto pos = s.find("dcl_position o");
 			if (pos != string::npos) {
-				oReg = s.substr(pos + 11, 2);
+				oReg = s.substr(pos + 13, 2);
 				shader += s + "\n";
 			}
 			else {
@@ -145,9 +142,9 @@ string changeASM(vector<byte> ASM, bool left) {
 				string conv(buf);
 				string changeSep = left ? "l(-" + sep + ")" : "l(" + sep + ")";
 				shader +=
-					"add r11.x, " + sourceReg + ".w, l(-" + conv + ")\n" +
-					"mad r11.x, r11.x, " + changeSep + ", r" + sourceReg + ".x\n" +
-					"mov " + oReg + ".x, r11.x\n";
+					"    add r11.x, " + sourceReg + ".w, l(-" + conv + ")\n" +
+					"    mad r11.x, r11.x, " + changeSep + ", " + sourceReg + ".x\n" +
+					"    mov " + oReg + ".x, r11.x\n";
 			}
 		}
 		else {
@@ -208,24 +205,28 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 	string asmLeft = changeASM(*v, true);
 	string asmRight = changeASM(*v, false);
 
-	sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.txt", _crc);
+	if (deleteV)
+		delete v;
+
+	/*
+	sprintf_s(buffer, MAX_PATH, "%08X.original.asm", _crc);
 	fopen_s(&f, buffer, "wb");
 	fwrite(pShaderBytecode, 1, BytecodeLength, f);
 	fclose(f);
 
-	sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.left", _crc);
+	sprintf_s(buffer, MAX_PATH, "%08X.left.asm", _crc);
 	fopen_s(&f, buffer, "wb");
 	fwrite(asmLeft.data(), 1, asmLeft.size(), f);
 	fclose(f);
 
-	sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.right", _crc);
+	sprintf_s(buffer, MAX_PATH, "%08X.right.asm", _crc);
 	fopen_s(&f, buffer, "wb");
 	fwrite(asmRight.data(), 1, asmRight.size(), f);
 	fclose(f);
-
-	if (deleteV)
-		delete v;
+	*/
+	
 	if (asmLeft == "") {
+		LogInfo("No output: %08X\n", _crc);
 		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
 		ShaderMapVS[*ppShader] = _crc;
 		VSO vso = {};
@@ -237,31 +238,21 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 	LPD3DXBUFFER pAssembly;
 	D3DXAssembleShader(asmLeft.c_str(), asmLeft.size(), NULL, NULL, 0, &pAssembly, NULL);
 	if (pAssembly != NULL) {
-		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
+		sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
 		vso.Left = (IDirect3DVertexShader9*)*ppShader;
-	}
-	else {
-		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
-		ShaderMapVS[*ppShader] = _crc;
-		VSO vso = {};
-		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
-		VSOmap[vso.Neutral] = vso;
-		return hr;
 	}
 	D3DXAssembleShader(asmRight.c_str(), asmRight.size(), NULL, NULL, 0, &pAssembly, NULL);
 	if (pAssembly != NULL) {
 		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
 		ShaderMapVS[*ppShader] = _crc;
 		vso.Right = (IDirect3DVertexShader9*)*ppShader;
-		VSOmap[vso.Right];
+		VSOmap[vso.Right] = vso;
 		return hr;
 	}
 	else {
+		LogInfo("Failed compile: %08X\n", _crc);
 		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
 		ShaderMapVS[*ppShader] = _crc;
-		VSO vso = {};
-		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
-		VSOmap[vso.Neutral] = vso;
 		return hr;
 	}
 }
@@ -347,10 +338,6 @@ HRESULT STDMETHODCALLTYPE D3D9_VSSetShader(IDirect3DDevice9 * This, IDirect3DVer
 		LogInfo("Unknown VS\n");
 		hr = sVSSS_Hook.fnVSSS(This, pShader);
 	}
-	/*if (gl_left)
-		This->SetTexture(D3DVERTEXTEXTURESAMPLER0, gStereoTextureLeft);
-	else
-		This->SetTexture(D3DVERTEXTEXTURESAMPLER0, gStereoTextureRight);*/
 	return hr;
 }
 
@@ -364,100 +351,7 @@ HRESULT STDMETHODCALLTYPE D3D9_PSSetShader(IDirect3DDevice9 * This, IDirect3DPix
 		currentPS = _crc;
 	}
 	HRESULT hr = sPSSS_Hook.fnPSSS(This, pShader);
-	/*if (gl_left)
-		This->SetTexture(0, gStereoTextureLeft);
-	else
-		This->SetTexture(0, gStereoTextureRight);*/
 	return hr;
-}
-
-inline void PopulateTextureData(float* eye, unsigned int width, unsigned int height, unsigned int pixelBytes, float eyeSep, float sep, float conv)
-{
-	// Normally sep is in [0, 100], and we want the fractional part of 1. 
-	float finalSeparation = eyeSep * sep * 0.01f;
-	if (gl_left) {
-		eye[0] = -finalSeparation;
-		eye[1] = conv;
-		eye[2] = 1.0f;
-	}
-	else {
-		eye[0] = finalSeparation;
-		eye[1] = conv;
-		eye[2] = -1.0f;
-	}
-}
-
-typedef IDirect3DDevice9 Device;
-typedef IDirect3DTexture9 Texture;
-typedef IDirect3DSurface9 StagingResource;
-
-// Note that the texture must be at least 20 bytes wide to handle the stereo header.
-static const int StereoTexWidth = 8;
-static const int StereoTexHeight = 1;
-static const D3DFORMAT StereoTexFormat = D3DFMT_A32B32G32R32F;
-static const int StereoBytesPerPixel = 16;
-
-static StagingResource* CreateStagingResource(Device* pDevice, float eyeSep, float sep, float conv)
-{
-	StagingResource* staging = 0;
-	unsigned int stagingWidth = StereoTexWidth;
-	unsigned int stagingHeight = StereoTexHeight;
-
-	pDevice->CreateOffscreenPlainSurface(stagingWidth, stagingHeight, StereoTexFormat, D3DPOOL_SYSTEMMEM, &staging, NULL);
-
-	if (!staging) {
-		return 0;
-	}
-
-	D3DLOCKED_RECT lr;
-	staging->LockRect(&lr, NULL, 0);
-	unsigned char* sysData = (unsigned char*)lr.pBits;
-	unsigned int sysMemPitch = stagingWidth * StereoBytesPerPixel;
-
-	float* leftEyePtr = (float*)sysData;
-	PopulateTextureData(leftEyePtr, stagingWidth, stagingHeight, StereoBytesPerPixel, eyeSep, sep, conv);
-	staging->UnlockRect();
-
-	return staging;
-}
-
-static void UpdateTextureFromStaging(Device* pDevice, Texture* tex, StagingResource* staging)
-{
-	RECT stereoSrcRect;
-	stereoSrcRect.top = 0;
-	stereoSrcRect.bottom = StereoTexHeight;
-	stereoSrcRect.left = 0;
-	stereoSrcRect.right = StereoTexWidth;
-
-	POINT stereoDstPoint;
-	stereoDstPoint.x = 0;
-	stereoDstPoint.y = 0;
-
-	IDirect3DSurface9* texSurface;
-	tex->GetSurfaceLevel(0, &texSurface);
-
-	pDevice->UpdateSurface(staging, &stereoSrcRect, texSurface, &stereoDstPoint);
-	texSurface->Release();
-}
-
-HRESULT CreateStereoParamTexture(IDirect3DDevice9* d3d9)
-{	
-	float eyeSep = gEyeDist / (2.54f * gScreenSize * 16 / sqrtf(256 + 81));
-	gl_left = true;
-	d3d9->CreateTexture(8, 1, 1, D3DUSAGE_DYNAMIC, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &gStereoTextureLeft, NULL);
-	StagingResource* staging = CreateStagingResource(d3d9, eyeSep, gSep, gConv);
-	if (staging) {
-		UpdateTextureFromStaging(d3d9, gStereoTextureLeft, staging);
-		staging->Release();
-	}
-	gl_left = false;
-	d3d9->CreateTexture(8, 1, 1, D3DUSAGE_DYNAMIC, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &gStereoTextureRight, NULL);
-	staging = CreateStagingResource(d3d9, eyeSep, gSep, gConv);
-	if (staging) {
-		UpdateTextureFromStaging(d3d9, gStereoTextureRight, staging);
-		staging->Release();
-	}
-	return S_OK;
 }
 
 map<uint32_t, IDirect3DPixelShader9*> PresentPS;
@@ -755,7 +649,7 @@ void hook(IDirect3DDevice9** ppDevice) {
 		gl_hooked2 = true;
 	}
 	if (ppDevice != NULL) {
-		CreateStereoParamTexture(*ppDevice);
+		gl_left = true;
 	}
 }
 
@@ -884,6 +778,9 @@ void InitInstance()
 	if (GetPrivateProfileString("StereoSettings", "ScreenSize", "55", setting, MAX_PATH, INIfile)) {
 		gScreenSize = stof(setting);
 	}
+	gSep = min(100, max(0, gSep));
+	float eyeSep = gEyeDist / (2.54f * gScreenSize * 16 / sqrtf(256 + 81));
+	gFinalSep = eyeSep * gSep * 0.01f;
 
 	if (gl_dump) {
 		CreateDirectory("Dumps", NULL);
