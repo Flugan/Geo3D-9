@@ -106,20 +106,17 @@ vector<string> stringToLines(const char* start, int size) {
 
 string changeASM(vector<byte> ASM, bool left) {
 	string reg((char*)ASM.data(), ASM.size());
-	int tempReg = 10;
-	for (int i = 0; i < 10; i++) {
-		if (reg.find("r" + i) == string::npos) {
+	int tempReg = 20;
+	for (int i = 0; i < 20; i++) {
+		if (reg.find("r" + to_string(i)) == string::npos) {
 			tempReg = i;
 			break;
 		}
 	}
-	LogInfo("changeASM %d %d", tempReg, left);
 	auto lines = stringToLines((char*)ASM.data(), ASM.size());
 	string shader;
 	string oReg;
 	bool dcl = false;
-	bool dcl_ICB = false;
-	int temp = 0;
 	for (int i = 0; i < lines.size(); i++) {
 		string s = lines[i];
 		if (s.find("dcl") != string::npos) {
@@ -139,42 +136,47 @@ string changeASM(vector<byte> ASM, bool left) {
 				// no output
 				return "";
 			}
-			shader += s + "\n";
 			auto pos = s.find(oReg);
 			if (pos != string::npos) {
-				string reg = "r" + to_string(tempReg);
-				for (int j = 0; j < s.size(); i++) {
-					if (j < pos) {
-						shader += s[j];
+				string sourceReg = "r" + to_string(tempReg);
+				for (int i = 0; i < s.size(); i++) {
+					if (i < pos) {
+						shader += s[i];
 					}
-					else if (j == pos) {
-						shader += reg;
+					else if (i == pos) {
+						shader += sourceReg;
 					}
-					else if (j > pos + 1) {
-						shader += s[j];
+					else if (i > pos + 1) {
+						shader += s[i];
 					}
 				}
 				shader += "\n";
 			}
-			if (i == (lines.size() - 2)) {
-				string sourceReg = "r" + tempReg;
-				string calcReg = "r" + (tempReg + 1);
-				char buf[80];
-				sprintf_s(buf, 80, "%.8f", gFinalSep);
-				string sep(buf);
-				sprintf_s(buf, 80, "%.3f", gConv);
-				string conv(buf);
-				string changeSep = left ? "l(-" + sep + ")" : "l(" + sep + ")";
+			else {
+				shader += s + "\n";
+			}
+			if (i == (lines.size() - 3)) {
+				string sourceReg = "r" + to_string(tempReg);
+				string calcReg = "r" + to_string(tempReg + 1);
+				
 				shader +=
 				"    mov " + calcReg + ", " + sourceReg + "\n" +
-				"    add " + calcReg + ".x, " + sourceReg + ".w, l(-" + conv + ")\n" +
-				"    mad " + calcReg + ".x, " + calcReg + ".x, " + changeSep + ", " + sourceReg + ".x\n" +
+				"    add " + calcReg + ".x, " + sourceReg + ".w, c250.y\n" +
+				"    mad " + calcReg + ".x, " + calcReg + ".x, c250.x, " + sourceReg + ".x\n" +
 				"    mov " + oReg + ", " + calcReg + "\n";
 			}
 		}
 		else {
 			// before dcl
 			shader += s + "\n";
+			if (s.find("vs_") != string::npos) {
+				char buf[80];
+				sprintf_s(buf, 80, "%.8f", left ? -gFinalSep : gFinalSep);
+				string sep(buf);
+				sprintf_s(buf, 80, "%.3f", -gConv);
+				string conv(buf);
+				shader += "    def c250, " + sep + ", " + conv + ", 0, 0\n";
+			}
 		}
 	}
 	return shader;
@@ -249,7 +251,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 	fwrite(asmRight.data(), 1, asmRight.size(), f);
 	fclose(f);
 	*/
-	
+
 	if (asmLeft == "") {
 		LogInfo("No output: %08X\n", _crc);
 		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
@@ -266,18 +268,29 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 		sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
 		vso.Left = (IDirect3DVertexShader9*)*ppShader;
 	}
-	D3DXAssembleShader(asmRight.c_str(), asmRight.size(), NULL, NULL, 0, &pAssembly, NULL);
+	LPD3DXBUFFER pErrors;
+	D3DXAssembleShader(asmRight.c_str(), asmRight.size(), NULL, NULL, 0, &pAssembly, &pErrors);
+	if (pErrors != NULL) {
+		sprintf_s(buffer, MAX_PATH, "%08X.right.error.asm", _crc);
+		fopen_s(&f, buffer, "wb");
+		fwrite(pErrors->GetBufferPointer(), 1, pErrors->GetBufferSize(), f);
+		fclose(f);
+	}
 	if (pAssembly != NULL) {
 		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
 		ShaderMapVS[*ppShader] = _crc;
 		vso.Right = (IDirect3DVertexShader9*)*ppShader;
 		VSOmap[vso.Right] = vso;
+		VSOmap[vso.Left] = vso;
 		return hr;
 	}
 	else {
 		LogInfo("Failed compile: %08X\n", _crc);
 		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
 		ShaderMapVS[*ppShader] = _crc;
+		VSO vso = {};
+		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
+		VSOmap[vso.Neutral] = vso;
 		return hr;
 	}
 }
