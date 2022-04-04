@@ -123,7 +123,7 @@ string changeASM(vector<byte> ASM, bool left) {
 			dcl = true;
 			auto pos = s.find("dcl_position o");
 			if (pos != string::npos) {
-				oReg = s.substr(pos + 13, 2);
+				oReg = s.substr(pos + 13);
 				shader += s + "\n";
 			}
 			else {
@@ -146,7 +146,7 @@ string changeASM(vector<byte> ASM, bool left) {
 					else if (i == pos) {
 						shader += sourceReg;
 					}
-					else if (i > pos + 1) {
+					else if (i > pos + oReg.size() - 1) {
 						shader += s[i];
 					}
 				}
@@ -281,7 +281,6 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 		ShaderMapVS[*ppShader] = _crc;
 		vso.Right = (IDirect3DVertexShader9*)*ppShader;
 		VSOmap[vso.Right] = vso;
-		VSOmap[vso.Left] = vso;
 		return hr;
 	}
 	else {
@@ -348,18 +347,21 @@ HRESULT STDMETHODCALLTYPE D3D9_CreatePS(IDirect3DDevice9 * This, CONST DWORD* pF
 
 map<uint32_t, IDirect3DVertexShader9*> RunningVS;
 uint32_t currentVS = 0xFFFFFFFF;
-HRESULT STDMETHODCALLTYPE D3D9_VSSetShader(IDirect3DDevice9 * This, IDirect3DVertexShader9* pShader) {
+HRESULT STDMETHODCALLTYPE D3D9_SetVertexShader(IDirect3DDevice9 * This, IDirect3DVertexShader9* pShader) {
 	if (ShaderMapVS.count(pShader)) {
 		uint32_t _crc = ShaderMapVS[pShader];
 		LogInfo("VS: %08X\n", _crc);
 		RunningVS[_crc] = pShader;
 		currentVS = _crc;
 	}
-	HRESULT hr;
+	else {
+		LogInfo("Unknown VS\n");
+		return S_OK;
+	}
+	HRESULT hr = S_OK;
 	if (VSOmap.count(pShader) == 1) {
 		VSO* vso = &VSOmap[pShader];
 		if (vso->Neutral) {
-			LogInfo("No stereo VS\n");
 			hr = sVSSS_Hook.fnVSSS(This, vso->Neutral);
 		}
 		else {
@@ -372,16 +374,12 @@ HRESULT STDMETHODCALLTYPE D3D9_VSSetShader(IDirect3DDevice9 * This, IDirect3DVer
 			}
 		}
 	}
-	else {
-		LogInfo("Unknown VS\n");
-		hr = sVSSS_Hook.fnVSSS(This, pShader);
-	}
 	return hr;
 }
 
 map<uint32_t, IDirect3DPixelShader9*> RunningPS;
 uint32_t currentPS = 0xFFFFFFFF;
-HRESULT STDMETHODCALLTYPE D3D9_PSSetShader(IDirect3DDevice9 * This, IDirect3DPixelShader9* pShader) {
+HRESULT STDMETHODCALLTYPE D3D9_SetPixelShader(IDirect3DDevice9 * This, IDirect3DPixelShader9* pShader) {
 	if (ShaderMapPS.count(pShader)) {
 		uint32_t _crc = ShaderMapPS[pShader];
 		LogInfo("PS: %08X\n", _crc);
@@ -679,8 +677,8 @@ void hook(IDirect3DDevice9** ppDevice) {
 
 		cHookMgr.Hook(&(sCreateVS_Hook.nHookId), (LPVOID*)&(sCreateVS_Hook.fnCreateVS), gl_origVS, D3D9_CreateVS);
 		cHookMgr.Hook(&(sCreatePS_Hook.nHookId), (LPVOID*)&(sCreatePS_Hook.fnCreatePS), gl_origPS, D3D9_CreatePS);
-		cHookMgr.Hook(&(sVSSS_Hook.nHookId), (LPVOID*)&(sVSSS_Hook.fnVSSS), gl_origVSSS, D3D9_VSSetShader);
-		cHookMgr.Hook(&(sPSSS_Hook.nHookId), (LPVOID*)&(sPSSS_Hook.fnPSSS), gl_origPSSS, D3D9_PSSetShader);
+		cHookMgr.Hook(&(sVSSS_Hook.nHookId), (LPVOID*)&(sVSSS_Hook.fnVSSS), gl_origVSSS, D3D9_SetVertexShader);
+		cHookMgr.Hook(&(sPSSS_Hook.nHookId), (LPVOID*)&(sPSSS_Hook.fnPSSS), gl_origPSSS, D3D9_SetPixelShader);
 
 		cHookMgr.Hook(&(sPresent_Hook.nHookId), (LPVOID*)&(sPresent_Hook.fnPresent), gl_origPresent, D3D9_Present);
 
@@ -841,9 +839,6 @@ void InitInstance()
 	GetPrivateProfileString("Hunting", "mark_vertexshader", 0, setting, MAX_PATH, INIfile);
 	hBHs.push_back(new HuntButtonHandler(createButton(setting), "mark_vertexshader"));
 
-	GetPrivateProfileString("Hunting", "reload_fixes", 0, setting, MAX_PATH, INIfile);
-	hBHs.push_back(new HuntButtonHandler(createButton(setting), "reload_fixes"));
-
 	GetPrivateProfileString("Hunting", "toggle_hunting", 0, setting, MAX_PATH, INIfile);
 	hBHs.push_back(new HuntButtonHandler(createButton(setting), "toggle_hunting"));
 	
@@ -866,6 +861,7 @@ void LoadOriginalDll(void)
 	strcat_s(buffer, 80, "\\d3d9.dll");
 	
 	// try to load the system's d3d9.dll, if pointer empty
+	
 	if (!gl_hOriginalDll) gl_hOriginalDll = ::LoadLibrary(buffer);
 }
 
