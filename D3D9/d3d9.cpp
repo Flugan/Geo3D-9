@@ -209,60 +209,42 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 		fwrite(pShaderBytecode, 1, BytecodeLength, f);
 		fclose(f);
 	}
-	bool deleteV = false;
+
 	if (gl_patch) {
 		sprintf_s(buffer, MAX_PATH, "shaderoverride\\vertexshaders\\%08X.txt", _crc);
 		fopen_s(&f, buffer, "rb");
 		if (f != NULL) {
-			byte* shader = new byte[BytecodeLength * 4];
+			char* shader = new char[BytecodeLength * 4];
 			size_t size = fread(shader, 1, BytecodeLength * 4, f);
 			fclose(f);
-			v = new vector<byte>(size);
-			copy(shader, shader + size, v->begin());
-			delete[] shader;
-			deleteV = true;
+			LPD3DXBUFFER pAssembly;
+			D3DXAssembleShader(shader, size, NULL, NULL, 0, &pAssembly, NULL);
+			if (pAssembly != NULL) {
+				HRESULT hr = sCreateVS_Hook.fn(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
+				ShaderMapVS[*ppShader] = _crc;
+				return hr;
+			}
 		}
 	}
 
 	string asmLeft = changeASM(*v, true);
 	string asmRight = changeASM(*v, false);
 
-	if (deleteV)
-		delete v;
-
-	/*
-	sprintf_s(buffer, MAX_PATH, "%08X.original.asm", _crc);
+	sprintf_s(buffer, MAX_PATH, "%08X.original.txt", _crc);
 	fopen_s(&f, buffer, "wb");
 	fwrite(pShaderBytecode, 1, BytecodeLength, f);
 	fclose(f);
 
-	sprintf_s(buffer, MAX_PATH, "%08X.left.asm", _crc);
+	sprintf_s(buffer, MAX_PATH, "%08X.left.txt", _crc);
 	fopen_s(&f, buffer, "wb");
 	fwrite(asmLeft.data(), 1, asmLeft.size(), f);
 	fclose(f);
 
-	sprintf_s(buffer, MAX_PATH, "%08X.right.asm", _crc);
+	sprintf_s(buffer, MAX_PATH, "%08X.right.txt", _crc);
 	fopen_s(&f, buffer, "wb");
 	fwrite(asmRight.data(), 1, asmRight.size(), f);
 	fclose(f);
-	*/
-
-	if (asmLeft == "") {
-		LogInfo("No output: %08X\n", _crc);
-		HRESULT hr = sCreateVS_Hook.fn(This, pFunction, ppShader);
-		ShaderMapVS[*ppShader] = _crc;
-		VSO vso = {};
-		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
-		VSOmap[vso.Neutral] = vso;
-		return hr;
-	}
-	VSO vso = {};
 	LPD3DXBUFFER pAssembly;
-	D3DXAssembleShader(asmLeft.c_str(), asmLeft.size(), NULL, NULL, 0, &pAssembly, NULL);
-	if (pAssembly != NULL) {
-		sCreateVS_Hook.fn(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
-		vso.Left = (IDirect3DVertexShader9*)*ppShader;
-	}
 	LPD3DXBUFFER pErrors;
 	D3DXAssembleShader(asmRight.c_str(), asmRight.size(), NULL, NULL, 0, &pAssembly, &pErrors);
 	if (pErrors != NULL) {
@@ -271,22 +253,9 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 		fwrite(pErrors->GetBufferPointer(), 1, pErrors->GetBufferSize(), f);
 		fclose(f);
 	}
-	if (pAssembly != NULL) {
-		HRESULT hr = sCreateVS_Hook.fn(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
-		ShaderMapVS[*ppShader] = _crc;
-		vso.Right = (IDirect3DVertexShader9*)*ppShader;
-		VSOmap[vso.Right] = vso;
-		return hr;
-	}
-	else {
-		LogInfo("Failed compile: %08X\n", _crc);
-		HRESULT hr = sCreateVS_Hook.fn(This, pFunction, ppShader);
-		ShaderMapVS[*ppShader] = _crc;
-		VSO vso = {};
-		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
-		VSOmap[vso.Neutral] = vso;
-		return hr;
-	}
+	HRESULT hr = sCreateVS_Hook.fn(This, pFunction, ppShader);
+	ShaderMapVS[*ppShader] = _crc;
+	return hr;
 }
 
 map<IDirect3DPixelShader9*, uint32_t> ShaderMapPS;
@@ -314,6 +283,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreatePS(IDirect3DDevice9 * This, CONST DWORD* pF
 		fwrite(pShaderBytecode, 1, BytecodeLength, f);
 		fclose(f);
 	}
+	/*
 	if (gl_patch) {
 		sprintf_s(buffer, MAX_PATH, "shaderoverride\\pixelshaders\\%08X.txt", _crc);
 		fopen_s(&f, buffer, "rb");
@@ -330,6 +300,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreatePS(IDirect3DDevice9 * This, CONST DWORD* pF
 			}
 		}
 	}
+	*/
 	HRESULT hr = sCreatePS_Hook.fn(This, pFunction, ppShader);
 	ShaderMapPS[*ppShader] = _crc;
 	return hr;
@@ -344,26 +315,7 @@ HRESULT STDMETHODCALLTYPE D3D9_SetVertexShader(IDirect3DDevice9 * This, IDirect3
 		RunningVS[_crc] = pShader;
 		currentVS = _crc;
 	}
-	else {
-		LogInfo("Unknown VS\n");
-		return S_OK;
-	}
-	HRESULT hr = S_OK;
-	if (VSOmap.count(pShader) == 1) {
-		VSO* vso = &VSOmap[pShader];
-		if (vso->Neutral) {
-			hr = sVSSS_Hook.fn(This, vso->Neutral);
-		}
-		else {
-			LogInfo("Stereo VS\n");
-			if (gl_left) {
-				hr = sVSSS_Hook.fn(This, vso->Left);
-			}
-			else {
-				hr = sVSSS_Hook.fn(This, vso->Right);
-			}
-		}
-	}
+	HRESULT hr = sVSSS_Hook.fn(This, pShader);
 	return hr;
 }
 
