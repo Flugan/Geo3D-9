@@ -175,7 +175,7 @@ string changeASM(vector<byte> ASM, bool left) {
 				string sep(buf);
 				sprintf_s(buf, 80, "%.3f", -gConv);
 				string conv(buf);
-				shader += "    def c250, " + sep + ", " + conv + ", 0, 0\n";
+				shader += "    def c250, " + sep + ", " + sep + ", " + sep + ", " + sep + "\n";
 			}
 		}
 	}
