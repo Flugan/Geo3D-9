@@ -208,11 +208,6 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 		fopen_s(&f, buffer, "wb");
 		fwrite(pShaderBytecode, 1, BytecodeLength, f);
 		fclose(f);
-
-		//sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\VertexShaders\\%08X.bin", _crc);
-		//fopen_s(&f, buffer, "wb");
-		//fwrite(pFunction, 4, i, f);
-		//fclose(f);
 	}
 	bool deleteV = false;
 	if (gl_patch) {
@@ -318,11 +313,6 @@ HRESULT STDMETHODCALLTYPE D3D9_CreatePS(IDirect3DDevice9 * This, CONST DWORD* pF
 		fopen_s(&f, buffer, "wb");
 		fwrite(pShaderBytecode, 1, BytecodeLength, f);
 		fclose(f);
-
-		//sprintf_s(buffer, MAX_PATH, "Dumps\\AllShaders\\PixelShaders\\%08X.bin", _crc);
-		//fopen_s(&f, buffer, "wb");
-		//fwrite(pFunction, 4, i, f);
-		//fclose(f);
 	}
 	if (gl_patch) {
 		sprintf_s(buffer, MAX_PATH, "shaderoverride\\pixelshaders\\%08X.txt", _crc);
