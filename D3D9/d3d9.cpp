@@ -117,7 +117,7 @@ string changeASM(vector<byte> ASM, bool left) {
 	string shader;
 	string oReg;
 	bool dcl = false;
-	for (int i = 0; i < lines.size(); i++) {
+	for (size_t i = 0; i < lines.size(); i++) {
 		string s = lines[i];
 		if (s.find("dcl") != string::npos) {
 			dcl = true;
@@ -139,7 +139,7 @@ string changeASM(vector<byte> ASM, bool left) {
 			auto pos = s.find(oReg);
 			if (pos != string::npos) {
 				string sourceReg = "r" + to_string(tempReg);
-				for (int i = 0; i < s.size(); i++) {
+				for (size_t i = 0; i < s.size(); i++) {
 					if (i < pos) {
 						shader += s[i];
 					}
@@ -254,7 +254,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 
 	if (asmLeft == "") {
 		LogInfo("No output: %08X\n", _crc);
-		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
+		HRESULT hr = sCreateVS_Hook.fn(This, pFunction, ppShader);
 		ShaderMapVS[*ppShader] = _crc;
 		VSO vso = {};
 		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
@@ -265,7 +265,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 	LPD3DXBUFFER pAssembly;
 	D3DXAssembleShader(asmLeft.c_str(), asmLeft.size(), NULL, NULL, 0, &pAssembly, NULL);
 	if (pAssembly != NULL) {
-		sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
+		sCreateVS_Hook.fn(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
 		vso.Left = (IDirect3DVertexShader9*)*ppShader;
 	}
 	LPD3DXBUFFER pErrors;
@@ -277,7 +277,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 		fclose(f);
 	}
 	if (pAssembly != NULL) {
-		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
+		HRESULT hr = sCreateVS_Hook.fn(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
 		ShaderMapVS[*ppShader] = _crc;
 		vso.Right = (IDirect3DVertexShader9*)*ppShader;
 		VSOmap[vso.Right] = vso;
@@ -285,7 +285,7 @@ HRESULT STDMETHODCALLTYPE D3D9_CreateVS(IDirect3DDevice9 * This, CONST DWORD* pF
 	}
 	else {
 		LogInfo("Failed compile: %08X\n", _crc);
-		HRESULT hr = sCreateVS_Hook.fnCreateVS(This, pFunction, ppShader);
+		HRESULT hr = sCreateVS_Hook.fn(This, pFunction, ppShader);
 		ShaderMapVS[*ppShader] = _crc;
 		VSO vso = {};
 		vso.Neutral = (IDirect3DVertexShader9*)*ppShader;
@@ -334,13 +334,13 @@ HRESULT STDMETHODCALLTYPE D3D9_CreatePS(IDirect3DDevice9 * This, CONST DWORD* pF
 			LPD3DXBUFFER pAssembly;
 			D3DXAssembleShader(shader, size, NULL, NULL, 0, &pAssembly, NULL);
 			if (pAssembly != NULL) {
-				HRESULT hr = sCreatePS_Hook.fnCreatePS(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
+				HRESULT hr = sCreatePS_Hook.fn(This, (CONST DWORD*)pAssembly->GetBufferPointer(), ppShader);
 				ShaderMapPS[*ppShader] = _crc;
 				return hr;
 			}
 		}
 	}
-	HRESULT hr = sCreatePS_Hook.fnCreatePS(This, pFunction, ppShader);
+	HRESULT hr = sCreatePS_Hook.fn(This, pFunction, ppShader);
 	ShaderMapPS[*ppShader] = _crc;
 	return hr;
 }
@@ -362,15 +362,15 @@ HRESULT STDMETHODCALLTYPE D3D9_SetVertexShader(IDirect3DDevice9 * This, IDirect3
 	if (VSOmap.count(pShader) == 1) {
 		VSO* vso = &VSOmap[pShader];
 		if (vso->Neutral) {
-			hr = sVSSS_Hook.fnVSSS(This, vso->Neutral);
+			hr = sVSSS_Hook.fn(This, vso->Neutral);
 		}
 		else {
 			LogInfo("Stereo VS\n");
 			if (gl_left) {
-				hr = sVSSS_Hook.fnVSSS(This, vso->Left);
+				hr = sVSSS_Hook.fn(This, vso->Left);
 			}
 			else {
-				hr = sVSSS_Hook.fnVSSS(This, vso->Right);
+				hr = sVSSS_Hook.fn(This, vso->Right);
 			}
 		}
 	}
@@ -386,7 +386,7 @@ HRESULT STDMETHODCALLTYPE D3D9_SetPixelShader(IDirect3DDevice9 * This, IDirect3D
 		RunningPS[_crc] = pShader;
 		currentPS = _crc;
 	}
-	HRESULT hr = sPSSS_Hook.fnPSSS(This, pShader);
+	HRESULT hr = sPSSS_Hook.fn(This, pShader);
 	return hr;
 }
 
@@ -395,26 +395,23 @@ map<uint32_t, IDirect3DVertexShader9*> PresentVS;
 uint32_t PS_hash = 0;
 uint32_t VS_hash = 0;
 HRESULT STDMETHODCALLTYPE D3D9_Present(IDirect3DDevice9 * This, CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion) {
-	gl_left != gl_left;
+	gl_left = !gl_left;
 
 	frameFunction();
 
-	if (RunningVS.size() == 0 && RunningPS.size() == 0) {
-		LogInfo("Present empty\n");
-	} else {
-		PresentPS.clear();
-		PresentVS.clear();
-		for (auto i = RunningVS.begin(); i != RunningVS.end(); i++) {
-			PresentVS[i->first] = i->second;
-		}
-		for (auto i = RunningPS.begin(); i != RunningPS.end(); i++) {
-			PresentPS[i->first] = i->second;
-		}
-		RunningPS.clear();
-		RunningVS.clear();
-		LogInfo("Present: VS %zd PS %zd\n", PresentVS.size(), PresentPS.size());
+	PresentPS.clear();
+	PresentVS.clear();
+	for (auto i = RunningVS.begin(); i != RunningVS.end(); i++) {
+		PresentVS[i->first] = i->second;
 	}
-	return sPresent_Hook.fnPresent(This, pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
+	for (auto i = RunningPS.begin(); i != RunningPS.end(); i++) {
+		PresentPS[i->first] = i->second;
+	}
+	RunningPS.clear();
+	RunningVS.clear();
+	LogInfo("Present: VS %zd PS %zd\n", PresentVS.size(), PresentPS.size());
+
+	return sPresent_Hook.fn(This, pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 }
 
 bool beforeDraw() {
@@ -425,28 +422,28 @@ HRESULT STDMETHODCALLTYPE D3D9_DrawPrimitive(IDirect3DDevice9 * This, D3DPRIMITI
 	if (beforeDraw())
 		return S_OK;
 	else
-		return sDrawPrimitive_Hook.fnDrawPrimitive(This, PrimitiveType, StartVertex, PrimitiveCount);
+		return sDrawPrimitive_Hook.fn(This, PrimitiveType, StartVertex, PrimitiveCount);
 }
 
 HRESULT STDMETHODCALLTYPE D3D9_DrawIndexedPrimitive(IDirect3DDevice9 * This, D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount) {
 	if (beforeDraw())
 		return S_OK;
 	else
-		return sDrawIndexedPrimitive_Hook.fnDrawIndexedPrimitive(This, PrimitiveType, BaseVertexIndex, MinVertexIndex, NumVertices, startIndex, primCount);
+		return sDrawIndexedPrimitive_Hook.fn(This, PrimitiveType, BaseVertexIndex, MinVertexIndex, NumVertices, startIndex, primCount);
 }
 
 HRESULT STDMETHODCALLTYPE D3D9_DrawPrimitiveUP(IDirect3DDevice9 * This, D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride) {
 	if (beforeDraw())
 		return S_OK;
 	else
-		return sDrawPrimitiveUP_Hook.fnDrawPrimitiveUP(This, PrimitiveType, PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
+		return sDrawPrimitiveUP_Hook.fn(This, PrimitiveType, PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
 }
 
 HRESULT STDMETHODCALLTYPE D3D9_DrawIndexedPrimitiveUP(IDirect3DDevice9 * This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride) {
 	if (beforeDraw())
 		return S_OK;
 	else
-		return sDrawIndexedPrimitiveUP_Hook.fnDrawIndexedPrimitiveUP(This, PrimitiveType, PrimitiveCount, NumVertices, PrimitiveCount, pIndexData, IndexDataFormat, pVertexStreamZeroData, VertexStreamZeroStride);
+		return sDrawIndexedPrimitiveUP_Hook.fn(This, PrimitiveType, PrimitiveCount, NumVertices, PrimitiveCount, pIndexData, IndexDataFormat, pVertexStreamZeroData, VertexStreamZeroStride);
 }
 
 enum buttonPress { Unchanged, Down, Up };
@@ -670,17 +667,17 @@ void hook(IDirect3DDevice9** ppDevice) {
 		gl_origPS = (D3D9_PS)(*vTable)[106];
 		gl_origPSSS = (D3D9_PSSS)(*vTable)[107];
 
-		cHookMgr.Hook(&(sDrawPrimitive_Hook.nHookId), (LPVOID*)&(sDrawPrimitive_Hook.fnDrawPrimitive), gl_origDP, D3D9_DrawPrimitive);
-		cHookMgr.Hook(&(sDrawIndexedPrimitive_Hook.nHookId), (LPVOID*)&(sDrawIndexedPrimitive_Hook.fnDrawIndexedPrimitive), gl_origDIP, D3D9_DrawIndexedPrimitive);
-		cHookMgr.Hook(&(sDrawPrimitiveUP_Hook.nHookId), (LPVOID*)&(sDrawPrimitiveUP_Hook.fnDrawPrimitiveUP), gl_origDPUP, D3D9_DrawPrimitiveUP);
-		cHookMgr.Hook(&(sDrawIndexedPrimitiveUP_Hook.nHookId), (LPVOID*)&(sDrawIndexedPrimitiveUP_Hook.fnDrawIndexedPrimitiveUP), gl_origDIPUP, D3D9_DrawIndexedPrimitiveUP);
+		cHookMgr.Hook(&(sDrawPrimitive_Hook.nHookId), (LPVOID*)&(sDrawPrimitive_Hook.fn), gl_origDP, D3D9_DrawPrimitive);
+		cHookMgr.Hook(&(sDrawIndexedPrimitive_Hook.nHookId), (LPVOID*)&(sDrawIndexedPrimitive_Hook.fn), gl_origDIP, D3D9_DrawIndexedPrimitive);
+		cHookMgr.Hook(&(sDrawPrimitiveUP_Hook.nHookId), (LPVOID*)&(sDrawPrimitiveUP_Hook.fn), gl_origDPUP, D3D9_DrawPrimitiveUP);
+		cHookMgr.Hook(&(sDrawIndexedPrimitiveUP_Hook.nHookId), (LPVOID*)&(sDrawIndexedPrimitiveUP_Hook.fn), gl_origDIPUP, D3D9_DrawIndexedPrimitiveUP);
 
-		cHookMgr.Hook(&(sCreateVS_Hook.nHookId), (LPVOID*)&(sCreateVS_Hook.fnCreateVS), gl_origVS, D3D9_CreateVS);
-		cHookMgr.Hook(&(sCreatePS_Hook.nHookId), (LPVOID*)&(sCreatePS_Hook.fnCreatePS), gl_origPS, D3D9_CreatePS);
-		cHookMgr.Hook(&(sVSSS_Hook.nHookId), (LPVOID*)&(sVSSS_Hook.fnVSSS), gl_origVSSS, D3D9_SetVertexShader);
-		cHookMgr.Hook(&(sPSSS_Hook.nHookId), (LPVOID*)&(sPSSS_Hook.fnPSSS), gl_origPSSS, D3D9_SetPixelShader);
+		cHookMgr.Hook(&(sCreateVS_Hook.nHookId), (LPVOID*)&(sCreateVS_Hook.fn), gl_origVS, D3D9_CreateVS);
+		cHookMgr.Hook(&(sCreatePS_Hook.nHookId), (LPVOID*)&(sCreatePS_Hook.fn), gl_origPS, D3D9_CreatePS);
+		cHookMgr.Hook(&(sVSSS_Hook.nHookId), (LPVOID*)&(sVSSS_Hook.fn), gl_origVSSS, D3D9_SetVertexShader);
+		cHookMgr.Hook(&(sPSSS_Hook.nHookId), (LPVOID*)&(sPSSS_Hook.fn), gl_origPSSS, D3D9_SetPixelShader);
 
-		cHookMgr.Hook(&(sPresent_Hook.nHookId), (LPVOID*)&(sPresent_Hook.fnPresent), gl_origPresent, D3D9_Present);
+		cHookMgr.Hook(&(sPresent_Hook.nHookId), (LPVOID*)&(sPresent_Hook.fn), gl_origPresent, D3D9_Present);
 
 		gl_hooked2 = true;
 	}
@@ -697,7 +694,7 @@ HWND hFocusWindow,
 DWORD BehaviorFlags, 
 D3DPRESENT_PARAMETERS* pPresentationParameters, 
 IDirect3DDevice9** ppReturnedDeviceInterface) {
-	HRESULT res = sCreate_Hook.fnCreate(This, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
+	HRESULT res = sCreate_Hook.fn(This, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
 	hook(ppReturnedDeviceInterface);
 	return res;
 }
@@ -707,7 +704,7 @@ void hook(IDirect3D9* direct9) {
 	if (direct9 != NULL && !gl_hooked) {
 		DWORD*** vTable = (DWORD***)direct9;
 		gl_origCreate = (D3D9_Create)(*vTable)[16];
-		cHookMgr.Hook(&(sCreate_Hook.nHookId), (LPVOID*)&(sCreate_Hook.fnCreate), gl_origCreate, D3D9_CreateDevice);
+		cHookMgr.Hook(&(sCreate_Hook.nHookId), (LPVOID*)&(sCreate_Hook.fn), gl_origCreate, D3D9_CreateDevice);
 		gl_hooked = true;
 	}
 }
@@ -808,7 +805,7 @@ void InitInstance()
 	if (GetPrivateProfileString("StereoSettings", "StereoConvergence", "1.0", setting, MAX_PATH, INIfile)) {
 		gConv = stof(setting);
 	}
-	if (GetPrivateProfileString("StereoSettings", "EyeDistance", "6.3", setting, MAX_PATH, INIfile)) {
+	if (GetPrivateProfileString("StereoSettings", "EyeDistance", "6.5", setting, MAX_PATH, INIfile)) {
 		gEyeDist = stof(setting);
 	}
 	if (GetPrivateProfileString("StereoSettings", "ScreenSize", "55", setting, MAX_PATH, INIfile)) {

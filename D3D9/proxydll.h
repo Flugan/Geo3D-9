@@ -14,60 +14,60 @@ DWORD WINAPI D3DPERF_GetStatus();
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_Create)(IDirect3D9* This, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice9** ppReturnedDeviceInterface);
 static struct {
 	SIZE_T nHookId;
-	D3D9_Create fnCreate;
+	D3D9_Create fn;
 } sCreate_Hook = { 0, NULL };
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_PS)(IDirect3DDevice9 * This, CONST DWORD* pFunction, IDirect3DPixelShader9** ppShader);
 static struct {
 	SIZE_T nHookId;
-	D3D9_PS fnCreatePS;
+	D3D9_PS fn;
 } sCreatePS_Hook = { 0, NULL };
 
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_VS)(IDirect3DDevice9 * This, CONST DWORD* pFunction, IDirect3DVertexShader9** ppShader);
 static struct {
 	SIZE_T nHookId;
-	D3D9_VS fnCreateVS;
+	D3D9_VS fn;
 } sCreateVS_Hook = { 0, NULL };
 
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_VSSS)(IDirect3DDevice9 * This, IDirect3DVertexShader9* pShader);
 static struct {
 	SIZE_T nHookId;
-	D3D9_VSSS fnVSSS;
+	D3D9_VSSS fn;
 } sVSSS_Hook = { 0, NULL };
 
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_PSSS)(IDirect3DDevice9 * This, IDirect3DPixelShader9* pShader);
 static struct {
 	SIZE_T nHookId;
-	D3D9_PSSS fnPSSS;
+	D3D9_PSSS fn;
 } sPSSS_Hook = { 0, NULL };
 
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_P)(IDirect3DDevice9 * This, CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion);
 static struct {
 	SIZE_T nHookId;
-	D3D9_P fnPresent;
+	D3D9_P fn;
 } sPresent_Hook = { 0, NULL };
 
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_DP)(IDirect3DDevice9 * This, D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount); 
 static struct {
 	SIZE_T nHookId;
-	D3D9_DP fnDrawPrimitive;
+	D3D9_DP fn;
 } sDrawPrimitive_Hook = { 0, NULL };
 
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_DIP)(IDirect3DDevice9 * This, D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount);
 static struct {
 	SIZE_T nHookId;
-	D3D9_DIP fnDrawIndexedPrimitive;
+	D3D9_DIP fn;
 } sDrawIndexedPrimitive_Hook = { 0, NULL };
 
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_DPUP)(IDirect3DDevice9 * This, D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride); 
 static struct {
 	SIZE_T nHookId;
-	D3D9_DPUP fnDrawPrimitiveUP;
+	D3D9_DPUP fn;
 } sDrawPrimitiveUP_Hook = { 0, NULL };
 
 typedef HRESULT(STDMETHODCALLTYPE* D3D9_DIPUP)(IDirect3DDevice9 * This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 static struct {
 	SIZE_T nHookId;
-	D3D9_DIPUP fnDrawIndexedPrimitiveUP;
+	D3D9_DIPUP fn;
 } sDrawIndexedPrimitiveUP_Hook = { 0, NULL };
 
 void InitInstance();
